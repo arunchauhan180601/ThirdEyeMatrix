@@ -1,0 +1,38 @@
+how to get shopify store token ?
+
+To get a Shopify store token, you must create a custom app within your Shopify admin panel. The process will generate an access token that acts as the key for your custom app to securely communicate with and access your store's data through Shopify's APIs. You can create different tokens for accessing the Admin API or the Storefront API. 
+
+Important: The Admin API access token is only revealed once. Be sure to copy and save it securely. 
+
+How to get an Admin API access token
+
+From your Shopify admin, go to Settings > Apps and sales channels.
+
+Click Develop apps.
+
+If this is your first time, you may need to click Allow custom app development to proceed.
+
+Click Create an app and give it a descriptive name (e.g., "My Integration App").
+
+On the app's configuration page, navigate to the Configuration tab.
+
+Under Admin API integration, click Configure.
+
+Select the API scopes (permissions) that your app needs to access your store's data, such as read_products or write_orders. Then, click Save.
+
+Go back to the API credentials tab and click Install app.
+
+Confirm the installation by clicking Install in the pop-up window.
+
+In the Admin API access token section, click Reveal token once. Copy this token immediately and store it in a secure location. 
+
+How to get a Storefront API access token
+
+In the same custom app you created, go to the Configuration tab.
+
+Find Storefront API integration and click Configure.
+
+Select the API scopes that define what type of storefront data your app can access, such as products and collections.
+Click Save.
+
+Navigate to the API credentials tab. The Storefront API access token is always visible in its dedicated section, so you can copy it at any time. 
