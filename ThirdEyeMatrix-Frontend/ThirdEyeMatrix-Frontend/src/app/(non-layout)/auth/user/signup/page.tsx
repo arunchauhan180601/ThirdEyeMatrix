@@ -7,9 +7,6 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import Image from 'next/image'
 import signupImage from "../../../../../assets/images/Sign up-rafiki.png"
-import ReCAPTCHA from "react-google-recaptcha"
-
-
 export default function SignupPage() {
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
@@ -20,7 +17,6 @@ export default function SignupPage() {
     password: '',
     confirmPassword: '',
   })
-  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
@@ -37,12 +33,6 @@ export default function SignupPage() {
     // setError(null)
 
     const { email, password, confirmPassword } = formData
-
-    if (!recaptchaToken) {
-      setError('Please complete the reCAPTCHA');
-      setLoading(false);
-      return;
-    }
 
     if ( !email || !password || !confirmPassword) {
       setError('Please fill in all required fields')
@@ -61,26 +51,19 @@ export default function SignupPage() {
       setLoading(false)
       return
     }
-    console.log( formData.email , formData.password , formData.confirmPassword, recaptchaToken)
+    console.log( formData.email , formData.password , formData.confirmPassword)
     // Save data to local storage
     localStorage.setItem('signupEmail', email);
     localStorage.setItem('signupPassword', password);
-    localStorage.setItem('recaptchaToken', recaptchaToken); // Save recaptchaToken to localStorage
 
     setFormData({
     email: '',  
     password: '',
     confirmPassword: '',
   } );
-    setRecaptchaToken(null); // Reset reCAPTCHA token after submission
 
     router.push('/auth/user/signup/details');
    
-  }
-
-  function onRecaptchaChange(token: string | null) {
-    setRecaptchaToken(token);
-    if (error && token) setError(null); // Clear error if captcha is completed
   }
 
   return (
@@ -177,29 +160,21 @@ export default function SignupPage() {
                 </div>
               </div>
               {/* ReCAPTCHA */}
-              <div className="mt-4 w-full flex justify-start items-center bg-gray-50 p-2 rounded-lg">
-                <ReCAPTCHA
-                  sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || ""}
-                  onChange={onRecaptchaChange}
-                  theme='light'
-                  
-                />
-              </div>
               <div className="flex items-start justify-center text-sm">
                 <label className="flex items-center justify-center space-x-2 cursor-pointer">
                   <input
                     type="checkbox"
                     className="w-4 h-4 text-primary-500 border-gray-300 rounded focus:ring-primary-500"
                   />
-                  <span className="text-gray-600 dark:text-gray-400 font-custom mt-1 ">
+                  <p className="text-gray-600 dark:text-gray-400 font-custom  mt-3">
                     By creating an account, you agree to our terms, conditions & policies.
-                  </span>
+                  </p>
                 </label>
               </div>
               
               <button
                 type="submit"
-                disabled={!recaptchaToken || !formData.email || !formData.password || !formData.confirmPassword}
+                disabled={!formData.email || !formData.password || !formData.confirmPassword}
                 className="w-full py-2 mt-1 cursor-pointer font-semibold text-white font-custom transition-all duration-200 rounded-lg shadow-md bg-[#37B5FF] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed "
               >
                 Continue with Email

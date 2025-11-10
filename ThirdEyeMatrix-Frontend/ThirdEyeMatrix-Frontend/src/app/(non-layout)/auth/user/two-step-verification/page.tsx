@@ -15,6 +15,7 @@ export default function OtpPage() {
   const router = useRouter();
   const inputRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)]
   const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
+  const recaptchaRef = useRef<ReCAPTCHA | null>(null);
 
   const handleChange = (index: number, value: string) => {
     if (!/^[0-9]?$/.test(value)) return
@@ -114,14 +115,28 @@ export default function OtpPage() {
         });
         localStorage.setItem("user_Id", data.user_Id); // Save user_Id to localStorage
         router.push("/auth/user/reset-password");
+        return;
       } else {
-        toast.error(data.message || 'OTP verification failed', {
-          style: {
-            fontSize: '16px',
-            fontWeight: 'bold',
-            borderRadius: '10px',
-          },
-        });
+        if (response.status === 400) {
+          toast.error(data.message || 'Invalid or expired OTP', {
+            style: {
+              fontSize: '16px',
+              fontWeight: 'bold',
+              borderRadius: '10px',
+            },
+          });
+          return;
+        } else {
+          toast.error(data.message || 'OTP verification failed', {
+            style: {
+              fontSize: '16px',
+              fontWeight: 'bold',
+              borderRadius: '10px',
+            },
+          });
+        }
+        setRecaptchaToken(null);
+        recaptchaRef.current?.reset();
       }
     } catch (error) {
       console.error('Network error:', error);
@@ -140,7 +155,7 @@ export default function OtpPage() {
   }
 
   return (
-    <div className="relative flex items-center justify-center min-h-screen bg-gradient-to-r  from-white-100 via-sky-50 to-white-50">
+    <div className="relative flex items-center justify-center min-h-screen bg-linear-to-r  from-white-100 via-sky-50 to-white-50">
       <div className="w-full h-screen grid grid-cols-1 lg:grid-cols-2">
         <div className="relative hidden lg:block">
           <Image
@@ -185,6 +200,7 @@ export default function OtpPage() {
               {/* ReCAPTCHA */}
               <div className="mt-4 w-full flex justify-center items-center bg-[#f9f9f9] p-2 rounded-lg">
                 <ReCAPTCHA
+                  ref={recaptchaRef}
                   sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || ""}
                   onChange={onRecaptchaChange}
                 />

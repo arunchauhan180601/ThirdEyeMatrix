@@ -101,8 +101,8 @@ Embedding snippet for non-Next projects:
 <script
   async
   defer
-  src="https://vanna-churlish-florencia.ngrok-free.dev/pixel/thirdeye-pixel.js"
-  data-api-base="https://vanna-churlish-florencia.ngrok-free.dev"
+  src="https://logier-unsqueezed-teodoro.ngrok-free.dev/pixel/thirdeye-pixel.js"
+  data-api-base="https://logier-unsqueezed-teodoro.ngrok-free.dev"
   data-session-timeout-minutes="30"
 ></script>
 ```

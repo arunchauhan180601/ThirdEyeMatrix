@@ -1,8 +1,7 @@
 const axios = require("axios");
 const { db } = require("../../config/db");
 
-const APP_URL =
-  process.env.BACKEND_URL || "https://vanna-churlish-florencia.ngrok-free.dev";
+const APP_URL = process.env.BACKEND_URL || "https://logier-unsqueezed-teodoro.ngrok-free.dev";
 const frontend_url = process.env.FRONTEND_URL;
 
 // helper: ensure clean store URL (no trailing slash)

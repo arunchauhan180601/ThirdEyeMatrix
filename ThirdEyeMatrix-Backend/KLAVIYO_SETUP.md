@@ -9,6 +9,12 @@ This guide will help you set up Klaviyo OAuth integration for your ThirdEyeMatri
 
 ## Step 1: Create a Klaviyo OAuth App
 
+Klaviyo login : dhameliya26@gmail.com
+ 
+Klaviyo Password : Magesture123.
+
+klaviyo redirect and key url : https://www.klaviyo.com/manage-apps
+
 1. **Log into your Klaviyo account**
 2. **Go to Account → Settings → API Keys**
 3. **Create a new OAuth App:**
@@ -24,7 +30,7 @@ This guide will help you set up Klaviyo OAuth integration for your ThirdEyeMatri
      - `campaigns:read` - Read email campaigns
      - `flows:read` - Read automated flows
      - `metrics:read` - Read campaign metrics
-   - Add redirect URI: `http://localhost:5000/api/klaviyo/callback`
+   - Add redirect URI: `https://logier-unsqueezed-teodoro.ngrok-free.dev/api/klaviyo/callback`
    - Click "Create"
 4. **Copy the Client ID and Client Secret** (you'll only see the secret once)
 
@@ -36,7 +42,7 @@ Add these variables to your `.env` file in the backend:
 # Klaviyo OAuth Configuration
 KLAVIYO_CLIENT_ID=your_klaviyo_client_id_here
 KLAVIYO_CLIENT_SECRET=your_klaviyo_client_secret_here
-KLAVIYO_REDIRECT_URI=http://localhost:5000/api/klaviyo/callback
+KLAVIYO_REDIRECT_URI=https://logier-unsqueezed-teodoro.ngrok-free.dev/api/klaviyo/callback
 
 # Existing variables (keep these)
 BECKEND_URL=http://localhost:5000

@@ -10,9 +10,7 @@ const KLAVIYO_CLIENT_SECRET = process.env.KLAVIYO_CLIENT_SECRET;
 const KLAVIYO_BASE_URL = "https://a.klaviyo.com/api";
 const KLAVIYO_OAUTH_URL = "https://www.klaviyo.com/oauth";
 const KLAVIYO_TOKEN_URL = "https://a.klaviyo.com/oauth";
-const KLAVIYO_REDIRECT_URI =
-  process.env.KLAVIYO_REDIRECT_URI ||
-  "https://vanna-churlish-florencia.ngrok-free.dev/api/klaviyo/callback";
+const KLAVIYO_REDIRECT_URI = process.env.KLAVIYO_REDIRECT_URI || "https://logier-unsqueezed-teodoro.ngrok-free.dev/api/klaviyo/callback";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 const oauthStore = new Map();
@@ -139,7 +137,7 @@ async function startOAuth(req, res) {
       client_id: KLAVIYO_CLIENT_ID,
       redirect_uri: KLAVIYO_REDIRECT_URI,
       scope:
-        "accounts:read events:read events:write profiles:read profiles:write lists:read campaigns:read flows:read metrics:read email-campaigns:read",
+        "accounts:read events:read events:write profiles:read profiles:write lists:read campaigns:read flows:read metrics:read ",
       state,
       code_challenge_method: "S256",
       code_challenge: codeChallenge,
@@ -223,9 +221,9 @@ async function oauthCallback(req, res) {
 
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
-    // ✅ Force token validity for 5 days (regardless of Klaviyo's default expiry)
-    const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000; // 5 days in milliseconds
-    const expiresAt = new Date(Date.now() + FIVE_DAYS_MS);
+    // ✅ Force token validity for 30 days (regardless of Klaviyo's default expiry)
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds
+    const expiresAt = new Date(Date.now() + THIRTY_DAYS_MS);
 
     await db("stores")
       .where({ user_id: userId, id: storeId })

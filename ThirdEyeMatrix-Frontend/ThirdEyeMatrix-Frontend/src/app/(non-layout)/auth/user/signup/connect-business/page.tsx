@@ -5,6 +5,7 @@ import Image from "next/image";
 import signupImage from "../../../../../../assets/images/Sign up-rafiki.png";
 import { useRouter } from "next/navigation";
 import { toast } from "react-toastify";
+import ReCAPTCHA from "react-google-recaptcha";
 
 export default function ConnectBusinessPage() {
   const router = useRouter();
@@ -16,6 +17,7 @@ export default function ConnectBusinessPage() {
     storeTimezone: "",
   });
   const [loading, setLoading] = useState(false);
+  const [recaptchaToken, setRecaptchaToken] = useState<string | null>(null);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -39,7 +41,6 @@ export default function ConnectBusinessPage() {
     const phoneNumber = localStorage.getItem("signupPhoneNumber");
     const howDidYouHear = localStorage.getItem("signupHowDidYouHear");
     const platform = localStorage.getItem("signupPlatform");
-    const recaptchaToken = localStorage.getItem("recaptchaToken");
     const magentoCredentials = localStorage.getItem("magentoCredentials");
     const parsedMagentoCredentials = magentoCredentials
       ? JSON.parse(magentoCredentials)
@@ -58,7 +59,8 @@ export default function ConnectBusinessPage() {
       !formData.annualRevenue ||
       !formData.storeCurrency ||
       !formData.storeTimezone ||
-      !formData.industryCategory
+      !formData.industryCategory ||
+      !recaptchaToken
     ) {
       toast.error("Please fill in all required fields.", {
         style: {
@@ -108,6 +110,20 @@ export default function ConnectBusinessPage() {
 
       const data = await response.json();
 
+      if (response.status === 409) {
+        toast.error(data.message || "User already exists", {
+          style: {
+            fontSize: "16px",
+            fontWeight: "bold",
+            borderRadius: "10px",
+          },
+        });
+        setRecaptchaToken(null);
+        setLoading(false);
+        router.push("/auth/user/signup");
+        return;
+      }
+
       if (response.ok) {
         // Clear local storage after successful signup
         localStorage.removeItem("signupEmail");
@@ -117,7 +133,6 @@ export default function ConnectBusinessPage() {
         localStorage.removeItem("signupPhoneNumber");
         localStorage.removeItem("signupHowDidYouHear");
         localStorage.removeItem("signupPlatform");
-        localStorage.removeItem("recaptchaToken");
         localStorage.removeItem("magentoCredentials");
 
         toast.success("User registered successfully!", {
@@ -134,8 +149,18 @@ export default function ConnectBusinessPage() {
           industryCategory: "",
           storeTimezone: "",
         });
+        setRecaptchaToken(null);
         router.push("/auth/user/signin");
+        return;
       }
+
+      toast.error(data.message || "An error occurred during signup!", {
+        style: {
+          fontSize: "16px",
+          fontWeight: "bold",
+          borderRadius: "10px",
+        },
+      });
     } catch (err: any) {
       toast.error(err.message || "An error occurred during signup!", {
         style: {
@@ -315,6 +340,14 @@ export default function ConnectBusinessPage() {
                   <option value="Other">Others</option>
                 </select>
               </div>
+            <div className="mt-4 w-full flex justify-start items-center bg-gray-50 p-2 rounded-lg">
+              <ReCAPTCHA
+                sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || ""}
+                onChange={(token) => setRecaptchaToken(token)}
+                theme="light"
+              />
+            </div>
+             
 
               <button
                 type="submit"
@@ -324,7 +357,8 @@ export default function ConnectBusinessPage() {
                   !formData.annualRevenue ||
                   !formData.storeCurrency ||
                   !formData.industryCategory ||
-                  !formData.storeTimezone
+                !formData.storeTimezone ||
+                !recaptchaToken
                 }
                 className="w-full py-2 mt-1 cursor-pointer font-semibold text-white font-custom transition-all duration-200 rounded-lg shadow-md bg-[#37B5FF] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >

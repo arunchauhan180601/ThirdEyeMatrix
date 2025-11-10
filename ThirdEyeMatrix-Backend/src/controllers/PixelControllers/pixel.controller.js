@@ -1,7 +1,7 @@
 const knex = require('knex')(require('../../../knexfile').development);
 const { randomUUID } = require('crypto');
 
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
 const isUuid = (value) =>
   typeof value === 'string' &&
@@ -61,6 +61,8 @@ const ensureVisitor = async (trx, visitorPayload = {}, eventTimestamp) => {
     traits,
     address,
   } = visitorPayload;
+
+  // console.log(visitorId , email , phone , firstName, lastName);
 
   const now = eventTimestamp || new Date();
 

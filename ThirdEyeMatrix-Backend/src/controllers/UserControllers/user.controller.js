@@ -29,7 +29,7 @@ exports.signupUserAndStore = async (req, res) => {
     // Check if user already exists
     const existingUser = await knex("users").where({ email }).first();
     if (existingUser) {
-      return res.status(409).json({ message: "Email already registered" });
+      return res.status(409).json({ message: "User already exists" });
     }
 
     // Insert user into users table
@@ -67,7 +67,7 @@ exports.signupUserAndStore = async (req, res) => {
   } catch (error) {
     console.error("Error during signup:", error);
     if (error.code === "SQLITE_CONSTRAINT") {
-      return res.status(409).json({ message: "Email already registered" });
+      return res.status(409).json({ message: "User already exists" });
     }
     res.status(500).json({ message: "Server error during signup" });
   }

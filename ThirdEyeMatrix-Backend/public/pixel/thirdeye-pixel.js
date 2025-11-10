@@ -296,6 +296,14 @@
     });
   };
 
+  const debounce = (fn, wait = 150) => {
+    let timeoutId = null;
+    return (...args) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => fn(...args), wait);
+    };
+  };
+
   const sendWithBeacon = (body) => {
     try {
       return navigator.sendBeacon(collectEndpoint, body);
@@ -436,6 +444,157 @@
     enqueue(payload);
   };
 
+  const buildCheckoutIdentity = () => {
+    const baseSelectors = {
+      email: ['#billing_email', 'input[name="billing_email"]', '#customer_email', 'input[name="customer_email"]'],
+      phone: ['#billing_phone', 'input[name="billing_phone"]', '#customer_phone', 'input[name="customer_phone"]'],
+      firstName: ['#billing_first_name', 'input[name="billing_first_name"]', '#customer_first_name', 'input[name="customer_first_name"]'],
+      lastName: ['#billing_last_name', 'input[name="billing_last_name"]', '#customer_last_name', 'input[name="customer_last_name"]'],
+    };
+
+    const flatSelectors = (key, selectorList) => {
+      const keyword = key
+        .replace(/([A-Z])/g, '_$1')
+        .toLowerCase();
+      return [
+        ...selectorList,
+        `input[name*="${keyword}"]`,
+        `input[id*="${keyword}"]`,
+        `input[name*="${keyword.replace('name', '')}"]`,
+        `input[id*="${keyword.replace('name', '')}"]`,
+      ];
+    };
+
+    const identity = {};
+    Object.entries(baseSelectors).forEach(([key, list]) => {
+      const selectors = flatSelectors(key, list);
+      let value = null;
+
+      for (let i = 0; i < selectors.length; i += 1) {
+        const selector = selectors[i];
+        if (!selector) continue;
+        try {
+          const el = document.querySelector(selector);
+          if (el && el.value) {
+            value = el.value.trim();
+            break;
+          }
+        } catch (error) {
+          // ignore invalid selectors
+        }
+      }
+
+      if (!value) {
+        const inputs = Array.from(document.querySelectorAll('input'));
+        const targetInput = inputs.find((input) => {
+          const id = (input.id || '').toLowerCase();
+          const name = (input.name || '').toLowerCase();
+          const keyword = key.toLowerCase();
+          return (
+            (id && id.includes(keyword)) ||
+            (name && name.includes(keyword)) ||
+            (keyword.includes('first') && (id.includes('first') || name.includes('first'))) ||
+            (keyword.includes('last') && (id.includes('last') || name.includes('last')))
+          );
+        });
+
+        if (targetInput && targetInput.value) {
+          value = targetInput.value.trim();
+        }
+      }
+
+      if (value) {
+        identity[key] = value;
+      }
+    });
+
+    return identity;
+  };
+
+  const identityHasData = (identity = {}) =>
+    Boolean(identity.email || identity.phone || identity.firstName || identity.lastName);
+
+  const identityMatchesState = (identity = {}) => {
+    if (!state.identity) {
+      return false;
+    }
+    const current = {
+      email: state.identity.email,
+      phone: state.identity.phone,
+      firstName: state.identity.firstName,
+      lastName: state.identity.lastName,
+    };
+    return ['email', 'phone', 'firstName', 'lastName'].every(
+      (key) => (identity[key] || '').toLowerCase() === (current[key] || '').toLowerCase()
+    );
+  };
+
+  const initCheckoutIdentitySync = () => {
+    const checkoutForm =
+      document.querySelector('form.woocommerce-checkout') ||
+      document.querySelector('form[name="checkout"]') ||
+      document.querySelector('form.checkout');
+
+    if (!checkoutForm) {
+      return;
+    }
+
+    const attemptIdentify = () => {
+      const identity = buildCheckoutIdentity();
+      if (!identityHasData(identity)) {
+        return;
+      }
+      if (identityMatchesState(identity)) {
+        return;
+      }
+      identify(identity);
+    };
+
+    const debouncedIdentify = debounce(attemptIdentify, 200);
+
+    ['change', 'blur', 'input'].forEach((eventName) => {
+      checkoutForm.addEventListener(eventName, debouncedIdentify, true);
+    });
+
+    // Listen for WooCommerce checkout updates (jQuery event)
+    if (window.jQuery && window.jQuery.fn && window.jQuery(document && document.body).on) {
+      window.jQuery(document.body).on('updated_checkout', debouncedIdentify);
+      window.jQuery(document.body).on('checkout_error', debouncedIdentify);
+      window.jQuery(document.body).on('payment_method_selected', debouncedIdentify);
+    }
+
+    // Initial attempt for pre-filled data (e.g., logged-in customers)
+    attemptIdentify();
+
+    const mutationObserver = new MutationObserver(() => {
+      debouncedIdentify();
+    });
+
+    mutationObserver.observe(checkoutForm, { childList: true, subtree: true });
+
+    const intervalId = setInterval(() => {
+      debouncedIdentify();
+    }, 1500);
+
+    const tearDown = () => {
+      mutationObserver.disconnect();
+      clearInterval(intervalId);
+      checkoutForm.removeEventListener('change', debouncedIdentify, true);
+      checkoutForm.removeEventListener('blur', debouncedIdentify, true);
+      checkoutForm.removeEventListener('input', debouncedIdentify, true);
+      if (window.jQuery && window.jQuery.fn && window.jQuery(document && document.body).off) {
+        window.jQuery(document.body).off('updated_checkout', debouncedIdentify);
+        window.jQuery(document.body).off('checkout_error', debouncedIdentify);
+        window.jQuery(document.body).off('payment_method_selected', debouncedIdentify);
+      }
+      document.removeEventListener('pagehide', tearDown);
+      window.removeEventListener('beforeunload', tearDown);
+    };
+
+    document.addEventListener('pagehide', tearDown);
+    window.addEventListener('beforeunload', tearDown);
+  };
+
   const page = (properties = {}) => {
     const payload = buildPayload('PageView', properties, { eventId: uuid() });
     enqueue(payload);
@@ -478,6 +637,7 @@
     };
 
     page(pageProperties);
+    initCheckoutIdentitySync();
   };
 
   window.ThirdEyePixel = window.ThirdEyePixel || {
