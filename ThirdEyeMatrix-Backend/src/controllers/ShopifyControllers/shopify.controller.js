@@ -1,4 +1,5 @@
 const axios = require("axios");
+const crypto = require("crypto");
 const { db } = require("../../config/db");
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
@@ -7,9 +8,70 @@ const SCOPES ="read_analytics,read_customers,read_inventory,read_orders,read_pro
 const APP_URL = process.env.BECKEND_URL || "http://localhost:5000";
 const frontend_url = process.env.FRONTEND_URL;
 
+function normalizeShopDomain(storeUrl) {
+  if (!storeUrl || typeof storeUrl !== "string") return null;
+
+  const trimmed = storeUrl.trim();
+  if (!trimmed) return null;
+
+  const withoutProtocol = trimmed.replace(/^https?:\/\//i, "");
+  const withoutPath = withoutProtocol.split("/")[0];
+
+  return withoutPath.toLowerCase();
+}
+
+function ensureTrailingPath(baseUrl, path) {
+  const sanitizedBase = baseUrl.replace(/\/+$/, "");
+  const sanitizedPath = path.replace(/^\/+/, "");
+  return `${sanitizedBase}/${sanitizedPath}`;
+}
+
+function verifyShopifyHmac(query) {
+  if (!SHOPIFY_API_SECRET) {
+    console.error("SHOPIFY_API_SECRET is not configured");
+    return false;
+  }
+
+  const { hmac, signature, ...rest } = query;
+
+  if (!hmac) {
+    return false;
+  }
+
+  const message = Object.keys(rest)
+    .sort()
+    .map((key) => {
+      const rawValue = Array.isArray(rest[key]) ? rest[key].join(",") : rest[key];
+      const value = rawValue === undefined || rawValue === null ? "" : rawValue;
+      return `${key}=${value}`;
+    })
+    .join("&");
+
+  const generatedHmac = crypto
+    .createHmac("sha256", SHOPIFY_API_SECRET)
+    .update(message)
+    .digest("hex");
+
+  const generatedBuffer = Buffer.from(generatedHmac, "utf-8");
+  const hmacBuffer = Buffer.from(hmac, "utf-8");
+
+  if (generatedBuffer.length !== hmacBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(generatedBuffer, hmacBuffer);
+}
+
 // Step 1: Redirect user to Shopify OAuth
 exports.connectShopify = async (req, res) => {
   try {
+    if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+      console.error("Shopify credentials are not configured");
+      return res
+        .status(500)
+        .json({ message: "Shopify credentials are not configured" });
+    }
+
     const userId = req.user.id;
     const store = await db("stores").where({ user_id: userId }).first();
 
@@ -17,14 +79,28 @@ exports.connectShopify = async (req, res) => {
       return res.status(400).json({ message: "Store URL not found" });
     }
 
-    const shop = store.store_URL;
+    const shopDomain = normalizeShopDomain(store.store_URL);
+
+    if (!shopDomain) {
+      return res.status(400).json({ message: "Invalid store URL" });
+    }
+
     const state = Math.random().toString(36).substring(2, 15);
 
     // Save state in DB
-    await db("stores").where({ user_id: userId }).update({ oauth_state: state });
+    await db("stores")
+      .where({ user_id: userId })
+      .update({
+        oauth_state: state,
+        store_URL: shopDomain,
+        updated_at: db.fn.now(),
+      });
 
-    const redirectUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${SCOPES}&redirect_uri=${APP_URL}/api/shopify/callback&state=${state}`;
-   
+    const redirectUri = ensureTrailingPath(APP_URL, "/api/shopify/callback");
+    const redirectUrl = `https://${shopDomain}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${encodeURIComponent(
+      SCOPES
+    )}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+
     res.json({ redirectUrl });
   } catch (error) {
     console.error(error);
@@ -37,22 +113,40 @@ exports.shopifyCallback = async (req, res) => {
   const { code, shop, state } = req.query;
 
   try {
-    const store = await db("stores").where({ store_URL: shop }).first();
-
-    if (!store || !store.oauth_state) {
-      return res.status(403).send("No state stored for this shop");
+    if (!SHOPIFY_API_KEY || !SHOPIFY_API_SECRET) {
+      console.error("Shopify credentials are not configured");
+      return res
+        .status(500)
+        .send("Shopify credentials are not configured on the server");
     }
 
+    if (!verifyShopifyHmac(req.query)) {
+      return res.status(403).send("Invalid HMAC signature");
+    }
 
-    if (store.oauth_state !== state) {
+    const normalizedShop = normalizeShopDomain(shop);
+
+    if (!normalizedShop) {
+      return res.status(400).send("Invalid shop parameter");
+    }
+
+    const store = await db("stores")
+      .where({ oauth_state: state })
+      .andWhere(function (builder) {
+        builder.where({ store_URL: normalizedShop });
+        builder.orWhereRaw('LOWER("store_URL") = ?', [normalizedShop]);
+        builder.orWhere({ store_URL: `https://${normalizedShop}` });
+        builder.orWhere({ store_URL: `http://${normalizedShop}` });
+      })
+      .orderBy("updated_at", "desc")
+      .first();
+
+    if (!store) {
       return res.status(403).send("State mismatch. Possible CSRF attack.");
     }
 
-    // Clear state after verification
-    await db("stores").where({ id: store.id }).update({ oauth_state: null });
-
     // Exchange code for access token using Axios
-    const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
+    const tokenResponse = await axios.post(`https://${normalizedShop}/admin/oauth/access_token`, {
       client_id: SHOPIFY_API_KEY,
       client_secret: SHOPIFY_API_SECRET,
       code,
@@ -67,14 +161,30 @@ exports.shopifyCallback = async (req, res) => {
 
     // Save access_token in DB
     await db("stores")
-      .where({ store_URL: shop })
-      .update({ access_token: tokenData.access_token });
+      .where({ id: store.id })
+      .update({
+        access_token: tokenData.access_token,
+        store_URL: normalizedShop,
+        oauth_state: null,
+        updated_at: db.fn.now(),
+      });
 
     // Redirect to frontend success page
     res.redirect(`${frontend_url}/welcome/integrations`);
   } catch (error) {
-    console.error(error.response?.data || error.message);
-    res.status(500).send("Error exchanging access token");
+    const status = error.response?.status || 500;
+    const payload = error.response?.data || error.message;
+    console.error("Shopify token exchange failed:", payload);
+    res
+      .status(status)
+      .json({
+        message: "Error exchanging access token",
+        details:
+          (payload && payload.error_description) ||
+          payload?.error ||
+          payload?.message ||
+          payload,
+      });
   }
 };
 
