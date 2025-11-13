@@ -1259,33 +1259,55 @@ export default function Dashboard() {
                   <h2 className="font-semibold font-custom text-xl  ">Store</h2>
                 </div>
                 {/* Pagination Indicator - Only show when fetching new orders from API */}
-                {magentoPagination.isLoadingPage &&
-                magentoPagination.currentPage > 0 ? (
-                  <div className="flex items-center gap-3">
-                    {/* Page Numbers */}
+                {(() => {
+                  if (!magentoPagination.source) return false;
+                  if (magentoPagination.source === "api") {
+                    return (
+                      magentoPagination.isLoadingPage ||
+                      magentoPagination.hasMore
+                    );
+                  }
+                  if (magentoPagination.source === "database") {
+                    return magentoPagination.isLoadingPage;
+                  }
+                  return false;
+                })() ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 text-sm text-gray-700">
+                      <BeatLoader size={6} color="#374151" />
+                      <span className="font-medium whitespace-nowrap">
+                        {magentoPagination.source === "api"
+                          ? "Fetching all orders..."
+                          : "Loading saved orders..."}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-1 flex-wrap">
                       {Array.from(
                         { length: magentoPagination.currentPage },
-                        (_, i) => i + 1
+                        (_, idx) => idx + 1
                       ).map((pageNum) => (
                         <span
                           key={pageNum}
                           className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-gray-200 rounded border border-gray-300"
                         >
-                          {pageNum}
+                          {magentoPagination.source === "api"
+                            ? `Batch ${pageNum}`
+                            : `Page ${pageNum}`}
                         </span>
                       ))}
                       <span className="px-3 py-1 text-xs font-semibold bg-blue-500 text-white rounded-md animate-pulse shadow-md">
-                        {magentoPagination.currentPage + 1}
+                        {magentoPagination.source === "api"
+                          ? `Batch ${magentoPagination.currentPage + 1}`
+                          : `Page ${magentoPagination.currentPage + 1}`}
                       </span>
                     </div>
-                    {/* Loading Text */}
-                    <div className="flex items-center gap-2 text-sm text-gray-700">
-                      <BeatLoader size={6} color="#374151" />
-                      <span className="font-medium whitespace-nowrap">
-                        Fetching more orders
+                    {magentoPagination.lastBatchCount > 0 && (
+                      <span className="text-xs text-gray-500">
+                        {magentoPagination.source === "api"
+                          ? `Last batch saved ${magentoPagination.lastBatchCount} orders`
+                          : `Loaded ${magentoPagination.lastBatchCount} saved orders`}
                       </span>
-                    </div>
+                    )}
                   </div>
                 ) : magentoPagination.currentPage > 0 &&
                   !magentoPagination.hasMore &&

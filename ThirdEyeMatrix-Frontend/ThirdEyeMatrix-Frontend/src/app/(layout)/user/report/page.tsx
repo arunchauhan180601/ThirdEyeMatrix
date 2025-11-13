@@ -656,6 +656,10 @@ export default function Report() {
     (sum, order) => sum + getOrderRevenue(order),
     0
   );
+  const totalWooReturns = allOrders.reduce(
+    (sum, order) => sum + getRefundsExcludingTax(order),
+    0
+  );
   const totalSales = allOrders.reduce(
     (sum, order) =>
       sum + (getOrderRevenue(order) - getRefundsExcludingTax(order)),
@@ -738,6 +742,10 @@ export default function Report() {
       return sum + refundTotal;
     }, 0);
   };
+  const totalShopifyReturns = allShopifyOrders.reduce(
+    (sum, order) => sum + getShopifyRefundsExcludingTax(order),
+    0
+  );
   const shopifyTotalSales = allShopifyOrders.reduce(
     (sum, order) =>
       sum +
@@ -784,6 +792,10 @@ export default function Report() {
       return sum + refundTotal;
     }, 0);
   };
+  const totalMagentoReturns = data.magento.orders.reduce(
+    (sum, order) => sum + getMagentoRefundsExcludingTax(order),
+    0
+  );
   const totalMagentoSales = data.magento.orders.reduce(
     (sum, order) =>
       sum +
@@ -810,6 +822,58 @@ export default function Report() {
     (customNetProfit / customOrderRevenue) * 100
   );
 
+  const storeMetrics = (() => {
+    const base = {
+      orderRevenue: 0,
+      orders: 0,
+      returns: 0,
+      trueAOV: 0,
+      averageOrderValue: 0,
+      totalSales: 0,
+    };
+
+    if (platform === "Shopify") {
+      return {
+        orderRevenue: Math.round(totalShopifyOrderRevenue),
+        orders: totalShopifyOrders,
+        returns: Math.round(totalShopifyReturns),
+        trueAOV: Math.round(shopifyTrueAOV),
+        averageOrderValue: Math.round(overallAOV),
+        totalSales: Math.round(shopifyTotalSales),
+      };
+    }
+
+    if (platform === "Magento") {
+      const averageRevenuePerOrder =
+        totalMagentoOrders > 0
+          ? totalMagentoRevenue / totalMagentoOrders
+          : 0;
+      const averageSalesPerOrder =
+        totalMagentoOrders > 0
+          ? totalMagentoSales / totalMagentoOrders
+          : 0;
+
+      return {
+        orderRevenue: Math.round(totalMagentoRevenue),
+        orders: totalMagentoOrders,
+        returns: Math.round(totalMagentoReturns),
+        trueAOV: Math.round(averageRevenuePerOrder),
+        averageOrderValue: Math.round(averageSalesPerOrder),
+        totalSales: Math.round(totalMagentoSales),
+      };
+    }
+
+    // Default to WooCommerce metrics
+    return {
+      orderRevenue: Math.round(totalOrderRevenue),
+      orders: totalOrders,
+      returns: Math.round(totalWooReturns),
+      trueAOV: Math.round(trueAOV),
+      averageOrderValue: Math.round(averageOrderValue),
+      totalSales: Math.round(totalSales),
+    };
+  })();
+
   // Function to get metric value by name
   const getMetricValue = (metricName: string): string => {
     const metricMap: { [key: string]: number | string } = {
@@ -826,12 +890,12 @@ export default function Report() {
       "Profit on Ad Spend": 0, // placeholder
 
       // Store Metrics (WooCommerce)
-      "Order Revenue": Math.round(totalOrderRevenue),
-      Orders: totalOrders,
-      Returns: 0, // placeholder
-      "True AOV": Math.round(trueAOV),
-      "Average Order Value": Math.round(averageOrderValue),
-      "Total Sales": Math.round(totalSales),
+      "Order Revenue": storeMetrics.orderRevenue,
+      Orders: storeMetrics.orders,
+      Returns: storeMetrics.returns,
+      "True AOV": storeMetrics.trueAOV,
+      "Average Order Value": storeMetrics.averageOrderValue,
+      "Total Sales": storeMetrics.totalSales,
 
       // Shopify specific
       "Shopify Order Revenue": Math.round(totalShopifyOrderRevenue),
@@ -1482,7 +1546,7 @@ export default function Report() {
                   )
                 );
               }
-            }, 30000); // Increased from 15 seconds to 30 seconds
+            }, 70000); // Increased from 15 seconds to 70 seconds
           });
 
           // Try to capture from iframe

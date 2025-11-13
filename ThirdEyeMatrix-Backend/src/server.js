@@ -18,6 +18,7 @@ const reportRoutes = require("./routes/report.routes");
 const pixelRoutes = require("./routes/pixel.routes");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+const path = require("path");
 
 
 
@@ -31,8 +32,9 @@ const allowedOrigins = corsOriginsEnv
 
 connectDB();
 
-// Serve static files from the 'public' directory
-app.use(express.static('public'));
+// Serve static assets
+app.use(express.static(path.join(__dirname, "../public")));
+app.use("/pixel", express.static(path.join(__dirname, "../public/pixel")));
 
 app.use(
   cors({

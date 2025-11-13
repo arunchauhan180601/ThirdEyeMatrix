@@ -1,3 +1,13 @@
+<!-- How To Edit Klaviyo Redirect URI-->
+Klaviyo login : dhameliya26@gmail.com
+ 
+Klaviyo Password : Magesture123.
+
+klaviyo redirect and key url : https://www.klaviyo.com/manage-apps
+
+
+
+
 # Klaviyo OAuth Integration Setup Guide
 
 ## Overview

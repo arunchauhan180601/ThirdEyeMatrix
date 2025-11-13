@@ -197,6 +197,9 @@ interface MagentoPaginationState {
   hasMore: boolean;
   isLoadingPage: boolean;
   totalCount: number;
+  pageSize: number;
+  lastBatchCount: number;
+  source: "database" | "api" | null;
 }
 
 interface DashboardContextType {
@@ -255,6 +258,9 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     hasMore: true,
     isLoadingPage: false,
     totalCount: 0,
+    pageSize: 500,
+    lastBatchCount: 0,
+    source: null,
   });
 
   const fetchData = async <T,>(
@@ -279,144 +285,14 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     }
   };
 
-  // Load all existing orders from database
-  const loadAllOrdersFromDatabase = async (token: string) => {
-    try {
-      let allOrders: MagentoOrder[] = [];
-      let currentPage = 1;
-      let hasMore = true;
-
-      while (hasMore) {
-        const res = await fetch(
-          `http://localhost:5000/api/magento/orders?page=${currentPage}&pageSize=500&source=db`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
-        if (!res.ok) {
-          throw new Error("Failed to fetch orders from database");
-        }
-
-        const body = await res.json();
-        const orders: MagentoOrder[] = body.items || [];
-        hasMore = body.has_more || false;
-        const totalCount = body.total_count || 0;
-
-        if (orders.length > 0) {
-          allOrders = [...allOrders, ...orders];
-          console.log(`Loaded page ${currentPage} from database: ${orders.length} orders (Total: ${allOrders.length})`);
-        }
-
-        if (hasMore) {
-          currentPage++;
-        }
-      }
-
-      if (allOrders.length > 0) {
-        setData((prev) => ({
-          ...prev,
-          magento: {
-            ...prev.magento,
-            orders: allOrders,
-          },
-        }));
-
-        // Set pagination state to indicate we've loaded from DB (currentPage = 0 means no API fetching)
-        setMagentoPagination({
-          currentPage: 0, // 0 means loaded from DB, not fetching from API
-          hasMore: false,
-          isLoadingPage: false,
-          totalCount: allOrders.length,
-        });
-
-        console.log(`Loaded ${allOrders.length} orders from database`);
-      }
-    } catch (error) {
-      console.error("Error loading orders from database:", error);
-    }
-  };
-
-  // Fetch new orders from API (only if there are new orders)
-  const fetchNewOrdersFromAPI = async (token: string) => {
-    try {
-      // Check if there are new orders by fetching page 1 with auto source
-      // Don't use continueOnEmpty here - we only want to check for new orders
-      const checkRes = await fetch(
-        `http://localhost:5000/api/magento/orders?page=1&pageSize=500&source=auto`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (!checkRes.ok) {
-        throw new Error("Failed to check for new orders");
-      }
-
-      const checkBody = await checkRes.json();
-      
-      // If source is 'database', no new orders to fetch
-      if (checkBody.source === 'database') {
-        console.log("No new orders to fetch, all orders loaded from database");
-        setMagentoPagination((prev) => ({
-          ...prev,
-          currentPage: 0, // Keep at 0 to indicate no API fetching
-          hasMore: false,
-          isLoadingPage: false,
-        }));
-        return;
-      }
-
-      // If source is 'api', there are new orders - start fetching them
-      if (checkBody.source === 'api') {
-        console.log("New orders detected, starting to fetch from API");
-        const orders: MagentoOrder[] = checkBody.items || [];
-        const hasMore = checkBody.has_more || false;
-        const totalCount = checkBody.total_count || 0;
-
-        // Add new orders to existing ones
-        setData((prev) => ({
-          ...prev,
-          magento: {
-            ...prev.magento,
-            orders: [...prev.magento.orders, ...orders],
-          },
-        }));
-
-        setMagentoPagination({
-          currentPage: 1,
-          hasMore,
-          isLoadingPage: false,
-          totalCount,
-        });
-
-        // Continue fetching remaining pages if needed
-        if (hasMore) {
-          await fetchMagentoOrdersPage(2);
-        } else {
-          setMagentoPagination((prev) => ({
-            ...prev,
-            hasMore: false,
-          }));
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching new orders from API:", error);
-    }
-  };
-
   const fetchMagentoOrdersPage = useCallback(async (page: number) => {
     setMagentoPagination((prev) => {
       if (prev.isLoadingPage) return prev; // Prevent concurrent requests
-      return { ...prev, isLoadingPage: true };
+      return { ...prev, isLoadingPage: true, lastBatchCount: 0, source: "api" };
     });
-    
+
+    const DEFAULT_PAGE_SIZE = 500;
+
     try {
       const token =
         typeof window !== "undefined"
@@ -428,10 +304,8 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         return;
       }
 
-      // When fetching new orders, use source=api which will only fetch NEW orders (not all orders)
-      // Don't use continueOnEmpty here since we're only fetching new orders with date filter
       const res = await fetch(
-        `http://localhost:5000/api/magento/orders?page=${page}&pageSize=500&source=api`,
+        `http://localhost:5000/api/magento/orders?page=${page}&pageSize=${DEFAULT_PAGE_SIZE}&source=api`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -446,31 +320,152 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
       const body = await res.json();
       const orders: MagentoOrder[] = body.items || [];
-      const hasMore = body.has_more || false;
-      const totalCount = body.total_count || 0;
+      const hasMore = Boolean(body.has_more);
+      const backendPageSize = Number(body.pageSize) || DEFAULT_PAGE_SIZE;
+      const reportedTotalCount = Number(body.total_count) || 0;
+      let mergedLength = 0;
+      let batchCount = 0;
 
-      console.log(`Fetched Magento Orders Page ${page} from API:`, orders.length, "orders");
+      console.log(
+        `Fetched Magento Orders Batch ${page} from API:`,
+        orders.length,
+        "orders"
+      );
 
-      // Accumulate orders in state
-      setData((prev) => ({
+      setData((prev) => {
+        const baseOrders =
+          page === 1 && prev.magento.orders.length === 0
+            ? []
+            : prev.magento.orders;
+        const existingIds = new Set(baseOrders.map((order) => order.id));
+        const filteredNew = orders.filter((order) => !existingIds.has(order.id));
+        batchCount = filteredNew.length;
+        const merged = [...baseOrders, ...filteredNew];
+        mergedLength = merged.length;
+
+        return {
+          ...prev,
+          magento: {
+            ...prev.magento,
+            orders: merged,
+          },
+        };
+      });
+
+      setMagentoPagination((prev) => ({
         ...prev,
-        magento: {
-          ...prev.magento,
-          orders: [...prev.magento.orders, ...orders],
-        },
-      }));
-
-      setMagentoPagination({
         currentPage: page,
         hasMore,
         isLoadingPage: false,
-        totalCount,
-      });
+        totalCount: reportedTotalCount || mergedLength,
+        pageSize: backendPageSize,
+        lastBatchCount: batchCount,
+        source: "api",
+      }));
     } catch (error) {
       console.error("Error fetching Magento orders page:", error);
       setMagentoPagination((prev) => ({ ...prev, isLoadingPage: false }));
     }
   }, []);
+
+  const loadMagentoOrdersFromDatabase = useCallback(
+    async (token: string): Promise<number> => {
+      const PAGE_SIZE = 500;
+      let page = 1;
+      let hasMore = true;
+      let collected: MagentoOrder[] = [];
+
+      setMagentoPagination({
+        currentPage: 0,
+        hasMore: true,
+        isLoadingPage: true,
+        totalCount: 0,
+        pageSize: PAGE_SIZE,
+        lastBatchCount: 0,
+        source: "database",
+      });
+
+      try {
+        while (hasMore) {
+          const res = await fetch(
+            `http://localhost:5000/api/magento/orders?page=${page}&pageSize=${PAGE_SIZE}&source=db`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (!res.ok) {
+            throw new Error("Failed to load orders from database");
+          }
+
+          const body = await res.json();
+          const orders: MagentoOrder[] = body.items || [];
+          hasMore = Boolean(body.has_more);
+          const totalCount = Number(body.total_count) || 0;
+          const pageFromResponse = Number(body.page) || page;
+
+          const newOrders = orders.filter(
+            (order) => !collected.some((existing) => existing.id === order.id)
+          );
+
+          if (newOrders.length > 0) {
+            collected = [...collected, ...newOrders];
+            setData((prev) => ({
+              ...prev,
+              magento: {
+                ...prev.magento,
+                orders: collected,
+              },
+            }));
+          }
+
+          setMagentoPagination({
+            currentPage: collected.length > 0 ? pageFromResponse : 0,
+            hasMore,
+            isLoadingPage: hasMore,
+            totalCount: totalCount || collected.length,
+            pageSize: PAGE_SIZE,
+            lastBatchCount: orders.length,
+            source: "database",
+          });
+
+          if (!hasMore) {
+            break;
+          }
+
+          page += 1;
+        }
+
+        if (collected.length === 0) {
+          setMagentoPagination({
+            currentPage: 0,
+            hasMore: false,
+            isLoadingPage: false,
+            totalCount: 0,
+            pageSize: PAGE_SIZE,
+            lastBatchCount: 0,
+            source: "database",
+          });
+        }
+
+        return collected.length;
+      } catch (error) {
+        console.error("Error loading orders from database:", error);
+        setMagentoPagination((prev) => ({
+          ...prev,
+          isLoadingPage: false,
+          hasMore: false,
+          lastBatchCount: 0,
+          source: "database",
+        }));
+        return collected.length;
+      }
+    },
+    [setData]
+  );
 
   const refreshData = async () => {
     setIsLoading(true);
@@ -591,13 +586,18 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             hasMore: true,
             isLoadingPage: false,
             totalCount: 0,
+            pageSize: 500,
+            lastBatchCount: 0,
+            source: null,
           });
 
-          // First, load all existing orders from database
-          await loadAllOrdersFromDatabase(token);
+          // Load saved orders from database first
+          const loadedCount = await loadMagentoOrdersFromDatabase(token);
 
-          // Then check and fetch new orders from API if needed
-          await fetchNewOrdersFromAPI(token);
+          // If no orders stored yet, initiate Magento API sync
+          if (loadedCount === 0) {
+            await fetchMagentoOrdersPage(1);
+          }
         } catch (error) {
           console.error("Error fetching Magento data:", error);
         }
@@ -619,13 +619,21 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       platform === "Magento" &&
       magentoPagination.hasMore &&
       !magentoPagination.isLoadingPage &&
-      magentoPagination.currentPage > 0
+      magentoPagination.currentPage > 0 &&
+      magentoPagination.source === "api"
     ) {
       const nextPage = magentoPagination.currentPage + 1;
       console.log(`Auto-fetching next page from API: ${nextPage}`);
       fetchMagentoOrdersPage(nextPage);
     }
-  }, [magentoPagination.currentPage, magentoPagination.hasMore, magentoPagination.isLoadingPage, platform, fetchMagentoOrdersPage]);
+  }, [
+    magentoPagination.currentPage,
+    magentoPagination.hasMore,
+    magentoPagination.isLoadingPage,
+    magentoPagination.source,
+    platform,
+    fetchMagentoOrdersPage,
+  ]);
 
   const value: DashboardContextType = {
     platform,

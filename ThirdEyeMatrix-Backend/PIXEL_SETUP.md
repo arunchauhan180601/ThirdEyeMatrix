@@ -191,3 +191,14 @@ Server responses include authoritative identifiers:
 - Extend the ingest pipeline for server-side events or POS data.
 - Implement webhooks/exports to sync enriched conversions back to ad platforms.
 
+
+
+* Pixel earlier in store 
+
+   <script
+     async
+     defer
+     src="https://logier-unsqueezed-teodoro.ngrok-free.dev/pixel/thirdeye-pixel.js"
+     data-api-base="https://logier-unsqueezed-teodoro.ngrok-free.dev"
+     data-session-timeout-minutes="60"
+   ></script>

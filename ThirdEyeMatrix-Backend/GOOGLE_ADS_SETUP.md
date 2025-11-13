@@ -1,3 +1,14 @@
+<!-- TO EDIT AND ADD REDIRECT URI -->
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. We will see ThirdEyeMatrix-Google-Ads-Test
+3. select credentials in sidebar 
+4. under OAuth 2.0 Client IDs click on Third Eye Matrix Web
+5. add redirect_url  SERVER_GOOGLE_ADS_REDIRECT_URI="https://logier-unsqueezed-teodoro.ngrok-free.dev/api/google-ads/callback"   we can not add 192.168.1.122:5000 because it   is private . so i have keep line ngrok server . 
+6. save
+7. direct - https://console.cloud.google.com/auth/clients/194833788833-ji1o6ebc27gopa9rr97l9mqlme1tuk8n.apps.googleusercontent.com?project=dynamic-cooler-474810-m0
+
+
 # Google Ads API Integration Setup
 
 ## Prerequisites
@@ -12,6 +23,8 @@ npm install googleapis
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:5000/api/google-ads/callback
+
+I have added two REDIRECT_URL = https://logier-unsqueezed-teodoro.ngrok-free.dev/api/google-ads/callback so i need to keep open ngrok server in network server .
 ```
 
 ## Google Cloud Console Setup

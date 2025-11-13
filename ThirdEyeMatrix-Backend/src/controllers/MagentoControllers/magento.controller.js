@@ -651,6 +651,164 @@ function formatOrderFromDB(order) {
 }
 
 /**
+ * Helper: Format Magento API order for frontend response
+ */
+function formatMagentoApiOrder(order) {
+  if (!order || typeof order !== "object") {
+    return null;
+  }
+
+  const refundsSource =
+    order.extension_attributes?.creditmemos || order.refunds || [];
+
+  let refunds = null;
+  if (Array.isArray(refundsSource) && refundsSource.length > 0) {
+    refunds = refundsSource.map((refund) => ({
+      id: refund.id || refund.entity_id || null,
+      subtotal: refund.subtotal !== undefined
+        ? String(refund.subtotal)
+        : refund.base_subtotal !== undefined
+        ? String(refund.base_subtotal)
+        : "0",
+      shipping_amount: refund.shipping_amount !== undefined
+        ? String(refund.shipping_amount)
+        : refund.base_shipping_amount !== undefined
+        ? String(refund.base_shipping_amount)
+        : "0",
+      tax_amount: refund.tax_amount !== undefined
+        ? String(refund.tax_amount)
+        : refund.base_tax_amount !== undefined
+        ? String(refund.base_tax_amount)
+        : "0",
+    }));
+  }
+
+  return {
+    id: order.entity_id || order.id || null,
+    increment_id: order.increment_id || null,
+    subtotal:
+      order.subtotal !== undefined
+        ? String(order.subtotal)
+        : order.base_subtotal !== undefined
+        ? String(order.base_subtotal)
+        : null,
+    grand_total:
+      order.grand_total !== undefined
+        ? String(order.grand_total)
+        : order.base_grand_total !== undefined
+        ? String(order.base_grand_total)
+        : null,
+    discount_amount:
+      order.discount_amount !== undefined
+        ? String(order.discount_amount)
+        : order.base_discount_amount !== undefined
+        ? String(order.base_discount_amount)
+        : null,
+    tax_amount:
+      order.tax_amount !== undefined
+        ? String(order.tax_amount)
+        : order.base_tax_amount !== undefined
+        ? String(order.base_tax_amount)
+        : null,
+    shipping_amount:
+      order.shipping_amount !== undefined
+        ? String(order.shipping_amount)
+        : order.base_shipping_amount !== undefined
+        ? String(order.base_shipping_amount)
+        : null,
+    state: order.state || null,
+    created_at: order.created_at || null,
+    refunds,
+  };
+}
+
+function formatDateForMagento(date) {
+  if (!date) return null;
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+async function syncAllMagentoOrders({ store, userId, pageSize = 200 }) {
+  let currentPage = 1;
+  let totalFetched = 0;
+
+  while (true) {
+    const endpoint = `orders?searchCriteria[currentPage]=${currentPage}&searchCriteria[pageSize]=${pageSize}`;
+    const data = await fetchMagento(store, endpoint);
+    const items = Array.isArray(data?.items) ? data.items : [];
+
+    if (!items.length) {
+      break;
+    }
+
+    await saveOrdersToDB(items, userId, store.id);
+    totalFetched += items.length;
+
+    console.log(
+      `[Magento Sync] Batch ${currentPage}: ${totalFetched} orders stored so far`
+    );
+
+    if (items.length < pageSize) {
+      break;
+    }
+
+    currentPage += 1;
+  }
+
+  console.log(
+    `[Magento Sync] Full sync complete for store ${store.store_URL}. Total fetched=${totalFetched}`
+  );
+
+  return totalFetched;
+}
+
+async function syncNewMagentoOrders({ store, userId, pageSize = 200, createdAfter }) {
+  const formattedDate = formatDateForMagento(createdAfter);
+  if (!formattedDate) {
+    return 0;
+  }
+
+  console.log(
+    `[Magento Sync] Checking for new orders created after ${formattedDate} (pageSize=${pageSize})`
+  );
+
+  let currentPage = 1;
+  let totalFetched = 0;
+
+  while (true) {
+    const encodedDate = encodeURIComponent(formattedDate);
+    const endpoint = `orders?searchCriteria[currentPage]=${currentPage}&searchCriteria[pageSize]=${pageSize}&searchCriteria[filterGroups][0][filters][0][field]=created_at&searchCriteria[filterGroups][0][filters][0][value]=${encodedDate}&searchCriteria[filterGroups][0][filters][0][conditionType]=gt&searchCriteria[sortOrders][0][field]=created_at&searchCriteria[sortOrders][0][direction]=ASC`;
+
+    const data = await fetchMagento(store, endpoint);
+    const items = Array.isArray(data?.items) ? data.items : [];
+
+    if (!items.length) {
+      break;
+    }
+
+    await saveOrdersToDB(items, userId, store.id);
+    totalFetched += items.length;
+
+    console.log(
+      `[Magento Sync] Incremental batch ${currentPage}: ${totalFetched} new orders stored so far`
+    );
+
+    if (items.length < pageSize) {
+      break;
+    }
+
+    currentPage += 1;
+  }
+
+  console.log(
+    `[Magento Sync] Incremental sync complete. Total new orders fetched=${totalFetched}`
+  );
+
+  return totalFetched;
+}
+
+/**
  * Controller: Get Orders - Loads from database first, then fetches new orders from Magento if needed
  */
 exports.getAllOrders = async (req, res) => {
@@ -658,268 +816,188 @@ exports.getAllOrders = async (req, res) => {
     const store = await getStoreCredentials(req.user.id);
     
     // Get pagination parameters from query string
-    const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 500;
+    const rawPage = parseInt(req.query.page, 10);
+    const rawPageSize = req.query.pageSize;
+    const returnAll =
+      !rawPageSize || rawPageSize === 'all' || Number.isNaN(parseInt(rawPageSize, 10));
+    const page =
+      !returnAll && rawPage && rawPage > 0
+        ? rawPage
+        : 1;
+    const parsedPageSize = parseInt(rawPageSize, 10);
+    const pageSize = returnAll || Number.isNaN(parsedPageSize) ? undefined : parsedPageSize;
     const source = req.query.source || 'auto'; // 'db', 'api', or 'auto'
-    const continueOnEmpty = req.query.continueOnEmpty === 'true'; // Continue fetching even if page is empty
-    
-    // Get total count of orders in database for this store
-    const totalCountResult = await db("magento_orders")
-      .where({ store_id: store.id })
-      .count("* as count")
-      .first();
-    const totalCount = parseInt(totalCountResult?.count || 0);
+    const forceFullSync = req.query.forceFullSync === 'true';
+    const syncPageSize = Math.min(pageSize || 500, 500); // keep API page size reasonable
+    let fetchedFromApi = false;
 
-    // If source is 'db', always return orders from database
-    if (source === 'db' && totalCount > 0) {
-      const dbOrders = await db("magento_orders")
-        .where({ store_id: store.id })
-        .orderBy("magento_created_at", "desc")
-        .limit(pageSize)
-        .offset((page - 1) * pageSize)
-        .select(
-          "magento_order_id as id",
-          "increment_id",
-          "subtotal",
-          "grand_total",
-          "discount_amount",
-          "tax_amount",
-          "shipping_amount",
-          "state",
-          "magento_created_at as created_at",
-          "refunds"
-        );
+    if (source === 'api') {
+      const apiPageSize = Math.min(parseInt(req.query.pageSize, 10) || 500, 500);
+      const pageToFetch = rawPage && rawPage > 0 ? rawPage : 1;
+      const createdAfterParam = req.query.createdAfter;
+      const sortDirection = createdAfterParam ? 'ASC' : 'DESC';
 
-      const formattedOrders = dbOrders.map(formatOrderFromDB);
-      const totalPages = Math.ceil(totalCount / pageSize);
-      const hasMore = page < totalPages;
+      let endpoint = `orders?searchCriteria[currentPage]=${pageToFetch}&searchCriteria[pageSize]=${apiPageSize}&searchCriteria[sortOrders][0][field]=created_at&searchCriteria[sortOrders][0][direction]=${sortDirection}`;
 
-      console.log(`Returned page ${page} with ${formattedOrders.length} orders from database (has_more: ${hasMore})`);
+      if (createdAfterParam) {
+        const encodedDate = encodeURIComponent(createdAfterParam);
+        endpoint += `&searchCriteria[filterGroups][0][filters][0][field]=created_at&searchCriteria[filterGroups][0][filters][0][value]=${encodedDate}&searchCriteria[filterGroups][0][filters][0][conditionType]=gt`;
+      }
+
+      const data = await fetchMagento(store, endpoint);
+      const items = Array.isArray(data?.items) ? data.items : [];
+
+      if (items.length > 0) {
+        await saveOrdersToDB(items, req.user.id, store.id);
+      }
+
+      const formattedOrders = items
+        .map(formatMagentoApiOrder)
+        .filter(Boolean);
+      const hasMore = items.length === apiPageSize;
+      const totalCount =
+        typeof data?.total_count === 'number'
+          ? data.total_count
+          : formattedOrders.length;
 
       return res.json({
         items: formattedOrders,
-        page: page,
-        pageSize: pageSize,
+        page: pageToFetch,
+        pageSize: apiPageSize,
         total_count: totalCount,
         has_more: hasMore,
-        source: 'database'
+        source: 'api',
+        created_after: createdAfterParam || null,
       });
     }
 
-    // If source is 'auto' and we have orders in DB, check if there are new orders first
-    if (source === 'auto' && totalCount > 0) {
-      const latestOrder = await db("magento_orders")
-        .where({ store_id: store.id })
-        .orderBy("magento_created_at", "desc")
-        .orderBy("magento_order_id", "desc")
-        .first();
-
-      if (latestOrder && latestOrder.magento_created_at) {
-        // Check if there are new orders in Magento (fetch just 1 order to check)
-        try {
-          const latestDate = new Date(latestOrder.magento_created_at);
-          latestDate.setSeconds(latestDate.getSeconds() + 1);
-          const dateFilter = latestDate.toISOString().slice(0, 19).replace('T', ' ');
-          const encodedDateFilter = encodeURIComponent(dateFilter);
-          const checkEndpoint = `orders?searchCriteria[filterGroups][0][filters][0][field]=created_at&searchCriteria[filterGroups][0][filters][0][value]=${encodedDateFilter}&searchCriteria[filterGroups][0][filters][0][conditionType]=gt&searchCriteria[currentPage]=1&searchCriteria[pageSize]=1`;
-          const checkData = await fetchMagento(store, checkEndpoint);
-          const hasNewOrders = checkData.items && checkData.items.length > 0;
-          
-          if (!hasNewOrders) {
-            // No new orders, return from database
-            console.log(`Auto mode: No new orders found, returning from database (${totalCount} orders in DB)`);
-            const dbOrders = await db("magento_orders")
-              .where({ store_id: store.id })
-              .orderBy("magento_created_at", "desc")
-              .limit(pageSize)
-              .offset((page - 1) * pageSize)
-              .select(
-                "magento_order_id as id",
-                "increment_id",
-                "subtotal",
-                "grand_total",
-                "discount_amount",
-                "tax_amount",
-                "shipping_amount",
-                "state",
-                "magento_created_at as created_at",
-                "refunds"
-              );
-
-            const formattedOrders = dbOrders.map(formatOrderFromDB);
-            const totalPages = Math.ceil(totalCount / pageSize);
-            const hasMore = page < totalPages;
-
-            return res.json({
-              items: formattedOrders,
-              page: page,
-              pageSize: pageSize,
-              total_count: totalCount,
-              has_more: hasMore,
-              source: 'database'
-            });
-          }
-          // If hasNewOrders, continue to fetch new orders from API (will be handled below)
-          console.log(`Auto mode: New orders detected, will fetch from API`);
-        } catch (err) {
-          console.error("Error checking for new orders:", err.message);
-          // If check fails, return from database to avoid unnecessary API calls
-          const dbOrders = await db("magento_orders")
-            .where({ store_id: store.id })
-            .orderBy("magento_created_at", "desc")
-            .limit(pageSize)
-            .offset((page - 1) * pageSize)
-            .select(
-              "magento_order_id as id",
-              "increment_id",
-              "subtotal",
-              "grand_total",
-              "discount_amount",
-              "tax_amount",
-              "shipping_amount",
-              "state",
-              "magento_created_at as created_at",
-              "refunds"
-            );
-
-          const formattedOrders = dbOrders.map(formatOrderFromDB);
-          const totalPages = Math.ceil(totalCount / pageSize);
-          const hasMore = page < totalPages;
-
-          return res.json({
-            items: formattedOrders,
-            page: page,
-            pageSize: pageSize,
-            total_count: totalCount,
-            has_more: hasMore,
-            source: 'database'
-          });
-        }
-      }
-    }
-
-    // Fetch from Magento API - Only fetch NEW orders if orders exist in DB
-    // If no orders in DB, fetch all orders (initial sync)
-    let endpoint = '';
-    
-    // Get the latest order from database to determine what's new
-    const latestOrderForFetch = await db("magento_orders")
-      .where({ store_id: store.id })
-      .orderBy("magento_created_at", "desc")
-      .orderBy("magento_order_id", "desc")
-      .first();
-
-    if (latestOrderForFetch && latestOrderForFetch.magento_created_at && (source === 'api' || source === 'auto')) {
-      // When source is 'api' or 'auto' (and new orders detected), fetch only NEW orders (created after the latest order in database)
-      const latestDate = new Date(latestOrderForFetch.magento_created_at);
-      latestDate.setSeconds(latestDate.getSeconds() + 1);
-      const dateFilter = latestDate.toISOString().slice(0, 19).replace('T', ' ');
-      const encodedDateFilter = encodeURIComponent(dateFilter);
-      
-      console.log(`Fetching page ${page} of NEW orders from Magento API (created after: ${dateFilter})`);
-      
-      endpoint = `orders?searchCriteria[filterGroups][0][filters][0][field]=created_at&searchCriteria[filterGroups][0][filters][0][value]=${encodedDateFilter}&searchCriteria[filterGroups][0][filters][0][conditionType]=gt&searchCriteria[currentPage]=${page}&searchCriteria[pageSize]=${pageSize}`;
-    } else {
-      // If no orders in DB, fetch all orders (initial sync)
-      console.log(`Fetching page ${page} from Magento API (initial sync, pageSize: ${pageSize})`);
-      endpoint = `orders?searchCriteria[currentPage]=${page}&searchCriteria[pageSize]=${pageSize}`;
-    }
-
-    const data = await fetchMagento(store, endpoint);
-    const items = data.items || [];
-
-    if (items.length > 0) {
-      newOrders = items;
-      // Continue fetching if we got a full page (might be more pages)
-      hasMoreFromMagento = items.length === pageSize;
-      console.log(`Fetched page ${page} with ${items.length} orders from Magento`);
-    } else {
-      // If page is empty and continueOnEmpty is true, continue fetching to handle data gaps
-      // Continue up to page 200 (100k orders max) to ensure we get all orders
-      // This handles cases where there might be gaps in the order data
-      if (continueOnEmpty && page < 200) {
-        hasMoreFromMagento = true;
-        console.log(`No orders found on page ${page} - continuing to next page (up to page 200) to ensure all orders are fetched`);
-      } else {
-        hasMoreFromMagento = false;
-        console.log(`No orders found on page ${page} - stopping fetch (${continueOnEmpty ? 'reached max page limit' : 'continueOnEmpty not set'})`);
-      }
-    }
-
-    // Save new orders to database (saveOrdersToDB handles upserts)
-    if (newOrders.length > 0) {
-      try {
-        console.log(`Attempting to save ${newOrders.length} orders to database...`);
-        await saveOrdersToDB(newOrders, req.user.id, store.id);
-        console.log(`✓ Successfully saved ${newOrders.length} orders to database`);
-        
-        // Verify the save by checking the count
-        const verifyCount = await db("magento_orders")
-          .where({ store_id: store.id })
-          .count("* as count")
-          .first();
-        console.log(`Database now contains ${verifyCount?.count || 0} total orders`);
-      } catch (dbError) {
-        console.error("✗ Error saving new orders to database:", dbError.message);
-        console.error("DB Error stack:", dbError.stack);
-        // Don't throw - continue to return the orders to frontend even if save fails
-        // This allows the frontend to show the orders, but they won't persist
-      }
-    } else {
-      console.log(`No new orders to save for page ${page}`);
-    }
-
-    // Format the orders we just fetched from Magento for frontend
-    const formattedOrders = newOrders.map(order => {
-      // Extract refunds from extension_attributes or order.refunds
-      let refunds = null;
-      if (order.extension_attributes?.creditmemos) {
-        refunds = order.extension_attributes.creditmemos.map((memo) => ({
-          id: memo.entity_id || memo.id,
-          subtotal: String(memo.subtotal || 0),
-          shipping_amount: String(memo.shipping_amount || 0),
-          tax_amount: String(memo.tax_amount || 0),
-        }));
-      } else if (order.refunds && Array.isArray(order.refunds)) {
-        refunds = order.refunds.map((refund) => ({
-          id: refund.id,
-          subtotal: String(refund.subtotal || 0),
-          shipping_amount: String(refund.shipping_amount || 0),
-          tax_amount: String(refund.tax_amount || 0),
-        }));
-      }
-
-      return {
-        id: order.entity_id || order.id,
-        increment_id: order.increment_id || null,
-        subtotal: order.subtotal ? String(order.subtotal) : null,
-        grand_total: order.grand_total ? String(order.grand_total) : null,
-        discount_amount: order.discount_amount ? String(order.discount_amount) : null,
-        tax_amount: order.tax_amount ? String(order.tax_amount) : null,
-        shipping_amount: order.shipping_amount ? String(order.shipping_amount) : null,
-        state: order.state || null,
-        created_at: order.created_at || null,
-        refunds: refunds,
-      };
-    });
-
-    // Get updated total count after saving
-    const updatedTotalCountResult = await db("magento_orders")
+    const countRow = await db("magento_orders")
       .where({ store_id: store.id })
       .count("* as count")
       .first();
-    const updatedTotalCount = parseInt(updatedTotalCountResult?.count || 0);
+    let localCount = parseInt(countRow?.count || 0, 10);
+
+    // initial full sync if needed
+    if (forceFullSync || localCount === 0) {
+      const fetched = await syncAllMagentoOrders({
+        store,
+        userId: req.user.id,
+        pageSize: syncPageSize,
+      });
+      if (fetched > 0) {
+        fetchedFromApi = true;
+      }
+      const updatedCount = await db("magento_orders")
+        .where({ store_id: store.id })
+        .count("* as count")
+        .first();
+      localCount = parseInt(updatedCount?.count || 0, 10);
+      console.log(
+        `[Magento Sync] Database now holds ${localCount} total orders after full sync`
+      );
+    }
+
+    // sync new orders (created after latest stored)
+    const latestOrder = await db("magento_orders")
+      .where({ store_id: store.id })
+      .orderBy("magento_created_at", "desc")
+      .first();
+
+    if (latestOrder && !forceFullSync) {
+      const fetched = await syncNewMagentoOrders({
+        store,
+        userId: req.user.id,
+        pageSize: syncPageSize,
+        createdAfter: latestOrder.magento_created_at,
+      });
+      if (fetched > 0) {
+        fetchedFromApi = true;
+        const updatedCount = await db("magento_orders")
+          .where({ store_id: store.id })
+          .count("* as count")
+          .first();
+        localCount = parseInt(updatedCount?.count || 0, 10);
+        console.log(
+          `[Magento Sync] Database updated to ${localCount} total orders after incremental sync (newly fetched=${fetched})`
+        );
+      } else {
+        console.log("[Magento Sync] No new orders found during incremental sync.");
+      }
+    }
+
+    // If source=db requested, return without triggering additional sync
+    if (source === 'db' && !forceFullSync && localCount > 0) {
+      let dbQuery = db("magento_orders")
+        .where({ store_id: store.id })
+        .orderBy("magento_created_at", "desc");
+
+      if (!returnAll && pageSize) {
+        dbQuery = dbQuery.limit(pageSize).offset((page - 1) * pageSize);
+      }
+
+      const dbOrders = await dbQuery.select(
+        "magento_order_id as id",
+        "increment_id",
+        "subtotal",
+        "grand_total",
+        "discount_amount",
+        "tax_amount",
+        "shipping_amount",
+        "state",
+        "magento_created_at as created_at",
+        "refunds"
+      );
+
+      const formattedOrders = dbOrders.map(formatOrderFromDB);
+      const hasMore = !returnAll && pageSize ? localCount > page * pageSize : false;
+
+      return res.json({
+        items: formattedOrders,
+        page,
+        pageSize: pageSize || localCount,
+        total_count: localCount,
+        has_more: hasMore,
+        source: 'database',
+      });
+    }
+
+    // Fetch requested page from DB for response
+    let dbQuery = db("magento_orders")
+      .where({ store_id: store.id })
+      .orderBy("magento_created_at", "desc");
+
+    if (!returnAll && pageSize) {
+      dbQuery = dbQuery.limit(pageSize).offset((page - 1) * pageSize);
+    }
+
+    const dbOrders = await dbQuery.select(
+      "magento_order_id as id",
+      "increment_id",
+      "subtotal",
+      "grand_total",
+      "discount_amount",
+      "tax_amount",
+      "shipping_amount",
+      "state",
+      "magento_created_at as created_at",
+      "refunds"
+    );
+
+    const formattedOrders = dbOrders.map(formatOrderFromDB);
+    const hasMore = !returnAll && pageSize ? localCount > page * pageSize : false;
+
+    console.log(
+      `[Magento Orders] Responding with ${formattedOrders.length} orders (total stored=${localCount})`
+    );
 
     res.json({
       items: formattedOrders,
-      page: page,
-      pageSize: pageSize,
-      total_count: updatedTotalCount,
-      has_more: hasMoreFromMagento,
-      source: 'api'
+      page,
+      pageSize: pageSize || localCount,
+      total_count: localCount,
+      has_more: hasMore,
+      source: fetchedFromApi ? 'api' : 'database',
     });
-
-    console.log(`Returned page ${page} with ${formattedOrders.length} orders from API (has_more: ${hasMoreFromMagento})`);
   } catch (err) {
     console.error("getAllOrders error:", err.response?.data || err.message);
     res.status(500).json({ error: "Error fetching orders" });
