@@ -860,6 +860,9 @@ exports.getAllOrders = async (req, res) => {
           ? data.total_count
           : formattedOrders.length;
 
+      const totalOrderFetched = pageToFetch * apiPageSize;
+          console.log(` fetched page  ${pageToFetch} of batch ${apiPageSize} orders from Magento API (total_fetched= ${totalOrderFetched})`);
+
       return res.json({
         items: formattedOrders,
         page: pageToFetch,
@@ -877,56 +880,7 @@ exports.getAllOrders = async (req, res) => {
       .first();
     let localCount = parseInt(countRow?.count || 0, 10);
 
-    // initial full sync if needed
-    if (forceFullSync || localCount === 0) {
-      const fetched = await syncAllMagentoOrders({
-        store,
-        userId: req.user.id,
-        pageSize: syncPageSize,
-      });
-      if (fetched > 0) {
-        fetchedFromApi = true;
-      }
-      const updatedCount = await db("magento_orders")
-        .where({ store_id: store.id })
-        .count("* as count")
-        .first();
-      localCount = parseInt(updatedCount?.count || 0, 10);
-      console.log(
-        `[Magento Sync] Database now holds ${localCount} total orders after full sync`
-      );
-    }
-
-    // sync new orders (created after latest stored)
-    const latestOrder = await db("magento_orders")
-      .where({ store_id: store.id })
-      .orderBy("magento_created_at", "desc")
-      .first();
-
-    if (latestOrder && !forceFullSync) {
-      const fetched = await syncNewMagentoOrders({
-        store,
-        userId: req.user.id,
-        pageSize: syncPageSize,
-        createdAfter: latestOrder.magento_created_at,
-      });
-      if (fetched > 0) {
-        fetchedFromApi = true;
-        const updatedCount = await db("magento_orders")
-          .where({ store_id: store.id })
-          .count("* as count")
-          .first();
-        localCount = parseInt(updatedCount?.count || 0, 10);
-        console.log(
-          `[Magento Sync] Database updated to ${localCount} total orders after incremental sync (newly fetched=${fetched})`
-        );
-      } else {
-        console.log("[Magento Sync] No new orders found during incremental sync.");
-      }
-    }
-
-    // If source=db requested, return without triggering additional sync
-    if (source === 'db' && !forceFullSync && localCount > 0) {
+    const respondWithDatabaseOrders = async (responseSource = 'database') => {
       let dbQuery = db("magento_orders")
         .where({ store_id: store.id })
         .orderBy("magento_created_at", "desc");
@@ -957,47 +911,107 @@ exports.getAllOrders = async (req, res) => {
         pageSize: pageSize || localCount,
         total_count: localCount,
         has_more: hasMore,
-        source: 'database',
+        source: responseSource,
+      });
+    };
+
+    // full sync only when explicitly requested
+    if (forceFullSync) {
+      const fetched = await syncAllMagentoOrders({
+        store,
+        userId: req.user.id,
+        pageSize: syncPageSize,
+      });
+      if (fetched > 0) {
+        fetchedFromApi = true;
+      }
+      const updatedCount = await db("magento_orders")
+        .where({ store_id: store.id })
+        .count("* as count")
+        .first();
+      localCount = parseInt(updatedCount?.count || 0, 10);
+      console.log(
+        `[Magento Sync] Database now holds ${localCount} total orders after full sync`
+      );
+    }
+
+    if (source === 'db') {
+      return respondWithDatabaseOrders('database');
+    }
+
+    const effectivePageSize = pageSize || syncPageSize;
+    const requestedOffset =
+      effectivePageSize && page > 0 ? (page - 1) * effectivePageSize : 0;
+    const needsApiPage =
+      source === 'auto' &&
+      !forceFullSync &&
+      syncPageSize &&
+      (localCount === 0 || localCount <= requestedOffset);
+
+    if (needsApiPage) {
+      const pageToFetch = rawPage && rawPage > 0 ? rawPage : 1;
+      const endpoint = `orders?searchCriteria[currentPage]=${pageToFetch}&searchCriteria[pageSize]=${syncPageSize}&searchCriteria[sortOrders][0][field]=created_at&searchCriteria[sortOrders][0][direction]=DESC`;
+      const data = await fetchMagento(store, endpoint);
+      const items = Array.isArray(data?.items) ? data.items : [];
+
+      if (items.length > 0) {
+        await saveOrdersToDB(items, req.user.id, store.id);
+        fetchedFromApi = true;
+      }
+
+      const formattedOrders = items
+        .map(formatMagentoApiOrder)
+        .filter(Boolean);
+      const hasMore = items.length === syncPageSize;
+      const totalCount =
+        typeof data?.total_count === 'number'
+          ? data.total_count
+          : formattedOrders.length + requestedOffset;
+
+      return res.json({
+        items: formattedOrders,
+        page: pageToFetch,
+        pageSize: syncPageSize,
+        total_count: totalCount,
+        has_more: hasMore,
+        source: 'api',
+        created_after: null,
       });
     }
 
-    // Fetch requested page from DB for response
-    let dbQuery = db("magento_orders")
+    // sync new orders (created after latest stored)
+    const latestOrder = await db("magento_orders")
       .where({ store_id: store.id })
-      .orderBy("magento_created_at", "desc");
+      .orderBy("magento_created_at", "desc")
+      .first();
 
-    if (!returnAll && pageSize) {
-      dbQuery = dbQuery.limit(pageSize).offset((page - 1) * pageSize);
+    if (latestOrder && !forceFullSync) {
+      const fetched = await syncNewMagentoOrders({
+        store,
+        userId: req.user.id,
+        pageSize: syncPageSize,
+        createdAfter: latestOrder.magento_created_at,
+      });
+      if (fetched > 0) {
+        fetchedFromApi = true;
+        const updatedCount = await db("magento_orders")
+          .where({ store_id: store.id })
+          .count("* as count")
+          .first();
+        localCount = parseInt(updatedCount?.count || 0, 10);
+        console.log(
+          `[Magento Sync] Database updated to ${localCount} total orders after incremental sync (newly fetched=${fetched})`
+        );
+      } else {
+        console.log("[Magento Sync] No new orders found during incremental sync.");
+      }
     }
 
-    const dbOrders = await dbQuery.select(
-      "magento_order_id as id",
-      "increment_id",
-      "subtotal",
-      "grand_total",
-      "discount_amount",
-      "tax_amount",
-      "shipping_amount",
-      "state",
-      "magento_created_at as created_at",
-      "refunds"
-    );
-
-    const formattedOrders = dbOrders.map(formatOrderFromDB);
-    const hasMore = !returnAll && pageSize ? localCount > page * pageSize : false;
-
     console.log(
-      `[Magento Orders] Responding with ${formattedOrders.length} orders (total stored=${localCount})`
+      `[Magento Orders] Responding with paginated orders (total stored=${localCount})`
     );
 
-    res.json({
-      items: formattedOrders,
-      page,
-      pageSize: pageSize || localCount,
-      total_count: localCount,
-      has_more: hasMore,
-      source: fetchedFromApi ? 'api' : 'database',
-    });
+    return respondWithDatabaseOrders(fetchedFromApi ? 'api' : 'database');
   } catch (err) {
     console.error("getAllOrders error:", err.response?.data || err.message);
     res.status(500).json({ error: "Error fetching orders" });

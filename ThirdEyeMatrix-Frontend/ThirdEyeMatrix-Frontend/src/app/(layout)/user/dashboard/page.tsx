@@ -591,15 +591,15 @@ export default function Dashboard() {
       ? Math.round((customNetProfit / customOrderRevenue) * 100)
       : 0;
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-[80vh]">
-        <div className="text-lg font-medium text-gray-700">
-          <BeatLoader />
-        </div>
-      </div>
-    );
-  }
+  // if (isLoading) {
+  //   return (
+  //     <div className="flex items-center justify-center h-[80vh]">
+  //       <div className="text-lg font-medium text-gray-700">
+  //         <BeatLoader />
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <div className="container p-4 max-w-7xl mx-auto">
