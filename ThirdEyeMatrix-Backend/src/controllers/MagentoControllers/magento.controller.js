@@ -828,11 +828,11 @@ exports.getAllOrders = async (req, res) => {
     const pageSize = returnAll || Number.isNaN(parsedPageSize) ? undefined : parsedPageSize;
     const source = req.query.source || 'auto'; // 'db', 'api', or 'auto'
     const forceFullSync = req.query.forceFullSync === 'true';
-    const syncPageSize = Math.min(pageSize || 500, 500); // keep API page size reasonable
+    const syncPageSize = Math.min(pageSize || 700, 700); // keep API page size reasonable
     let fetchedFromApi = false;
 
     if (source === 'api') {
-      const apiPageSize = Math.min(parseInt(req.query.pageSize, 10) || 500, 500);
+      const apiPageSize = Math.min(parseInt(req.query.pageSize, 10) || 700, 700);
       const pageToFetch = rawPage && rawPage > 0 ? rawPage : 1;
       const createdAfterParam = req.query.createdAfter;
       const sortDirection = createdAfterParam ? 'ASC' : 'DESC';

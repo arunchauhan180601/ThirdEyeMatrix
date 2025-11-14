@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 
+
 // Type definitions
 interface ShopifyProduct {
   id: string;
@@ -174,6 +175,8 @@ interface MagentoOrder {
 
 type Platform = "Shopify" | "Woocommerce" | "Magento" | null;
 
+const MAGENTO_PAGE_SIZE = 700;
+
 interface DashboardData {
   shopify: {
     products: ShopifyProduct[];
@@ -214,7 +217,7 @@ interface DashboardContextType {
   setData: (data: DashboardData) => void;
   setMetaSpend: (spend: number) => void;
   refreshData: () => Promise<void>;
-  fetchMagentoOrdersPage: (page: number) => Promise<void>;
+  fetchMagentoOrdersPage: (page: number) => Promise<number>;
 }
 
 const DashboardContext = createContext<DashboardContextType | null>(null);
@@ -234,6 +237,8 @@ interface DashboardProviderProps {
 export function DashboardProvider({ children }: DashboardProviderProps) {
   const [platform, setPlatform] = useState<Platform>(null);
   const [storeCurrency, setStoreCurrency] = useState<string>("INR");
+  const NEXT_PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL;
+
   const [data, setData] = useState<DashboardData>({
     shopify: {
       products: [],
@@ -258,10 +263,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     hasMore: true,
     isLoadingPage: false,
     totalCount: 0,
-    pageSize: 500,
+    pageSize: MAGENTO_PAGE_SIZE,
     lastBatchCount: 0,
     source: null,
   });
+
 
   const fetchData = async <T,>(
     url: string,
@@ -291,7 +297,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       return { ...prev, isLoadingPage: true, lastBatchCount: 0, source: "api" };
     });
 
-    const DEFAULT_PAGE_SIZE = 500;
+    const DEFAULT_PAGE_SIZE = MAGENTO_PAGE_SIZE;
 
     try {
       const token =
@@ -301,11 +307,11 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
 
       if (!token) {
         setMagentoPagination((prev) => ({ ...prev, isLoadingPage: false }));
-        return;
+        return 0;
       }
 
       const res = await fetch(
-        `http://localhost:5000/api/magento/orders?page=${page}&pageSize=${DEFAULT_PAGE_SIZE}&source=api`,
+        `${NEXT_PUBLIC_API_URL}/api/magento/orders?page=${page}&pageSize=${DEFAULT_PAGE_SIZE}&source=api`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -362,15 +368,18 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         lastBatchCount: batchCount,
         source: "api",
       }));
+
+      return batchCount;
     } catch (error) {
       console.error("Error fetching Magento orders page:", error);
       setMagentoPagination((prev) => ({ ...prev, isLoadingPage: false }));
+      return 0;
     }
   }, []);
 
   const loadMagentoOrdersFromDatabase = useCallback(
     async (token: string): Promise<number> => {
-      const PAGE_SIZE = 500;
+      const PAGE_SIZE = MAGENTO_PAGE_SIZE;
       let page = 1;
       let hasMore = true;
       let collected: MagentoOrder[] = [];
@@ -388,7 +397,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       try {
         while (hasMore) {
           const res = await fetch(
-            `http://localhost:5000/api/magento/orders?page=${page}&pageSize=${PAGE_SIZE}&source=db`,
+            `${NEXT_PUBLIC_API_URL}/api/magento/orders?page=${page}&pageSize=${PAGE_SIZE}&source=db`,
             {
               headers: {
                 Authorization: `Bearer ${token}`,
@@ -481,7 +490,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       }
 
       // Fetch store info
-      const storeRes = await fetch("http://localhost:5000/api/user/store", {
+      const storeRes = await fetch(`${NEXT_PUBLIC_API_URL}/api/user/store`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
 
@@ -497,7 +506,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       // Fetch Meta insights spend
       try {
         const insightsRes = await fetch(
-          "http://localhost:5000/api/meta/insights?level=campaign&time_increment=1",
+          `${NEXT_PUBLIC_API_URL}/api/meta/insights?level=campaign&time_increment=1`,
           { headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
         if (insightsRes.ok) {
@@ -520,15 +529,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       if (storeData.platform === "Shopify") {
         const [products, customers, orders] = await Promise.all([
           fetchData<ShopifyProduct>(
-            "http://localhost:5000/api/shopify/products",
+          `${NEXT_PUBLIC_API_URL}/api/shopify/products`,
             token
           ),
           fetchData<ShopifyCustomer>(
-            "http://localhost:5000/api/shopify/customers",
+            `${NEXT_PUBLIC_API_URL}/api/shopify/customers`,
             token
           ),
           fetchData<ShopifyOrder>(
-            "http://localhost:5000/api/shopify/orders",
+            `${NEXT_PUBLIC_API_URL}/api/shopify/orders`,
             token
           ),
         ]);
@@ -542,15 +551,15 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
       } else if (storeData.platform === "Woocommerce") {
         const [products, customers, orders] = await Promise.all([
           fetchData<WooProduct>(
-            "http://localhost:5000/api/woocommerce/products",
+            `${NEXT_PUBLIC_API_URL}/api/woocommerce/products`,
             token
           ),
           fetchData<WooCustomer>(
-            "http://localhost:5000/api/woocommerce/customers",
+            `${NEXT_PUBLIC_API_URL}/api/woocommerce/customers`,
             token
           ),
           fetchData<WooOrder>(
-            "http://localhost:5000/api/woocommerce/orders",
+            `${NEXT_PUBLIC_API_URL}/api/woocommerce/orders`,
             token
           ),
         ]);
@@ -563,22 +572,10 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
         }));
       } else if (storeData.platform === "Magento") {
         try {
-          const products = await fetchData<MagentoProduct>(
-            "http://localhost:5000/api/magento/products",
-            token
-          );
-          console.log("Magento Products:", products);
-
-          const customers = await fetchData<MagentoCustomer>(
-            "http://localhost:5000/api/magento/customers",
-            token
-          );
-          console.log("Magento Customers:", customers);
-
-          // Reset orders and pagination state
+          // Reset Magento data before fetching in desired order
           setData((prev) => ({
             ...prev,
-            magento: { products, customers, orders: [] },
+            magento: { products: [], customers: [], orders: [] },
           }));
 
           setMagentoPagination({
@@ -586,18 +583,54 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
             hasMore: true,
             isLoadingPage: false,
             totalCount: 0,
-            pageSize: 500,
+            pageSize: MAGENTO_PAGE_SIZE,
             lastBatchCount: 0,
             source: null,
           });
 
-          // Load saved orders from database first
+          // 1. Fetch orders first (database then API)
           const loadedCount = await loadMagentoOrdersFromDatabase(token);
+          let totalOrdersFetched = loadedCount;
 
-          // If no orders stored yet, initiate Magento API sync
-          if (loadedCount === 0) {
-            await fetchMagentoOrdersPage(1);
+          const nextPageToFetch = Math.max(
+            Math.floor(totalOrdersFetched / MAGENTO_PAGE_SIZE) + 1,
+            1
+          );
+          const firstApiBatchCount = await fetchMagentoOrdersPage(nextPageToFetch);
+          totalOrdersFetched += firstApiBatchCount;
+
+          if (totalOrdersFetched === 0) {
+            console.warn("Magento orders failed to load; skipping customers and products fetch.");
+            return;
           }
+
+          // 2. Fetch customers after orders
+          const customers = await fetchData<MagentoCustomer>(
+            `${NEXT_PUBLIC_API_URL}/api/magento/customers`,
+            token
+          );
+          console.log("Magento Customers:", customers);
+          setData((prev) => ({
+            ...prev,
+            magento: {
+              ...prev.magento,
+              customers,
+            },
+          }));
+
+          // 3. Fetch products last
+          const products = await fetchData<MagentoProduct>(
+            `${NEXT_PUBLIC_API_URL}/api/magento/products`,
+            token
+          );
+          console.log("Magento Products:", products);
+          setData((prev) => ({
+            ...prev,
+            magento: {
+              ...prev.magento,
+              products,
+            },
+          }));
         } catch (error) {
           console.error("Error fetching Magento data:", error);
         }
@@ -624,7 +657,7 @@ export function DashboardProvider({ children }: DashboardProviderProps) {
     ) {
       const nextPage = magentoPagination.currentPage + 1;
       console.log(`Auto-fetching next page from API: ${nextPage}`);
-      fetchMagentoOrdersPage(nextPage);
+      void fetchMagentoOrdersPage(nextPage);
     }
   }, [
     magentoPagination.currentPage,

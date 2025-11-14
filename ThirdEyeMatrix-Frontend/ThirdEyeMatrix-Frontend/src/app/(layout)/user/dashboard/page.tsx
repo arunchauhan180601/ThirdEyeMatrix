@@ -591,15 +591,15 @@ export default function Dashboard() {
       ? Math.round((customNetProfit / customOrderRevenue) * 100)
       : 0;
 
-  // if (isLoading) {
-  //   return (
-  //     <div className="flex items-center justify-center h-[80vh]">
-  //       <div className="text-lg font-medium text-gray-700">
-  //         <BeatLoader />
-  //       </div>
-  //     </div>
-  //   );
-  // }
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-[80vh]">
+        <div className="text-lg font-medium text-gray-700">
+          <BeatLoader />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container p-4 max-w-7xl mx-auto">
@@ -1275,27 +1275,27 @@ export default function Dashboard() {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2 text-sm text-gray-700">
                       <BeatLoader size={6} color="#374151" />
-                      <span className="font-medium whitespace-nowrap">
+                      <span className="font-bold whitespace-nowrap font-custom text-md">
                         {magentoPagination.source === "api"
                           ? "Fetching all orders..."
                           : "Loading saved orders..."}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1 flex-wrap">
+                    <div className="flex items-center gap-1 border p-2 rounded-md max-w-5xl font-custom overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-orange-300 scrollbar-track-orange-200">
                       {Array.from(
                         { length: magentoPagination.currentPage },
                         (_, idx) => idx + 1
                       ).map((pageNum) => (
                         <span
                           key={pageNum}
-                          className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-gray-200 rounded border border-gray-300"
+                          className="px-2.5 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded border border-gray-300 shrink-0"
                         >
                           {magentoPagination.source === "api"
                             ? `Batch ${pageNum}`
                             : `Page ${pageNum}`}
                         </span>
                       ))}
-                      <span className="px-3 py-1 text-xs font-semibold bg-blue-500 text-white rounded-md animate-pulse shadow-md">
+                      <span className="px-3 py-1 text-xs font-semibold bg-blue-500 text-white rounded-md animate-pulse shadow-md shrink-0">
                         {magentoPagination.source === "api"
                           ? `Batch ${magentoPagination.currentPage + 1}`
                           : `Page ${magentoPagination.currentPage + 1}`}
